@@ -5,7 +5,7 @@ University of Illinois at Urbana-Champaign
 
 CVPR 2025
 
-[Project Page](https://davidyao99.github.io/uni4d/)
+[Paper](https://arxiv.org/abs/2503.21761) | [Project Page](https://davidyao99.github.io/uni4d/)
 
 **4D Reconstruction from Single Casual Video**  
 ![Teaser](assets/teaser.png)
