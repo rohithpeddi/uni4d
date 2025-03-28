@@ -122,6 +122,8 @@ python ./uni4d/run.py --config ./uni4d/config/config_demo.yaml --depth_net <cust
 
 ## Evaluation
 
+We provide scripts to prepare all datasets, preprocessing, and run Uni4D to reproduce Table 1 and 2 in our main paper.
+
 ### Datasets
 
 We provide scripts for downloading and preparing datasets (Bonn, TUM-Dynamics, Sintel, Kitti) used in our paper. Run:
