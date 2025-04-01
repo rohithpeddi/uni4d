@@ -13,11 +13,11 @@ dyn_laplacian_weight_t: 100.0
 experiment_name: demo
 log: True
 opt_intrinsics: True
-depth_net: "unidepth"
+depth_dir: "unidepth"
 cotracker_path: "cotrackerv3_10_50"
-deva_dir: "deva"
+dyn_mask_dir: "deva"
 video: None
 loss_fn: "l1"
-deterministic: True
+deterministic: False
 vis_4d: True
 seed: 42
