@@ -81,7 +81,7 @@ for i,video in tqdm(enumerate(videos)):
     text_prompt_file = os.path.join(work_dir, args.input_dir, "tags.json")
     with open(text_prompt_file, "r") as f:
         dyn_objs = json.load(f)["dynamic"]
-    text_input = ". ".join(dyn_objs)
+    text_input = ". ".join(dyn_objs) + "."
     
     output_path_vis = os.path.join(work_dir, OUTPUT_DIR, "vis")
     output_path_mask = os.path.join(work_dir, OUTPUT_DIR, "mask")
