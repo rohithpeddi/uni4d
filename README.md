@@ -3,7 +3,7 @@
 David Yifan Yao, Albert J. Zhai, Shenlong Wang  
 University of Illinois at Urbana-Champaign
 
-CVPR 2025
+CVPR 2025 (Highlight)
 
 [Paper](https://arxiv.org/abs/2503.21761) | [Project Page](https://davidyao99.github.io/uni4d/)
 
