@@ -36,7 +36,7 @@ class AgCoTracker:
 
         self.ag_frames_dir = os.path.join(ag_root_dir, "frames")
         self.ag_4D_dir = os.path.join(ag_root_dir, "ag4D")
-        self.uni4D_dir = os.path.join(ag_root_dir, "uni4D")
+        self.uni4D_dir = os.path.join(self.ag_4D_dir, "uni4D")
         self.cotracker_dir = os.path.join(self.uni4D_dir, "cotracker")
         os.makedirs(self.cotracker_dir, exist_ok=True)
 
