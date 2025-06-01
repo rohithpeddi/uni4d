@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import imageio
 import numpy as np
@@ -12,15 +13,6 @@ from tqdm import tqdm
 
 sys.path.insert(0, './co-tracker')
 from cotracker.predictor import CoTrackerPredictor
-
-
-def get_frames(path):
-    frames = []
-    files = sorted([x for x in os.listdir(path) if x.endswith(".png") or x.endswith(".jpg")])
-    for file in files:
-        frames.append(imageio.imread(os.path.join(path, file)))
-    frames = np.array(frames)  # F x H x W x C
-    return frames
 
 
 class AgCoTracker:
@@ -46,14 +38,36 @@ class AgCoTracker:
         self.ag_4D_dir = os.path.join(ag_root_dir, "ag4D")
         self.uni4D_dir = os.path.join(ag_root_dir, "uni4D")
         self.cotracker_dir = os.path.join(self.uni4D_dir, "cotracker")
+        os.makedirs(self.cotracker_dir, exist_ok=True)
+
+        self.frames_path = os.path.join(self.ag_root_dir, "frames")
+        self.annotations_path = os.path.join(self.ag_root_dir, "annotations")
+        self.video_list = sorted(os.listdir(self.frames_path))
+        self.gt_annotations = sorted(os.listdir(self.annotations_path))
+        print("Total number of ground truth annotations: ", len(self.gt_annotations))
+
+        video_id_frame_id_list_pkl_file_path = os.path.join(self.ag_root_dir, "4d_video_frame_id_list.pkl")
+        if os.path.exists(video_id_frame_id_list_pkl_file_path):
+            with open(video_id_frame_id_list_pkl_file_path, "rb") as f:
+                self.video_id_frame_id_list = pickle.load(f)
+        else:
+            assert False, f"Please generate {video_id_frame_id_list_pkl_file_path} first"
+
+    def get_frames(self, video_name):
+        frames = []
+        video_frames_path = os.path.join(self.frames_path, video_name)
+        frame_id_list = self.video_id_frame_id_list[video_name]
+        frame_id_list = sorted(np.unique(frame_id_list))
+        for frame_id in frame_id_list:
+            frames.append(imageio.imread(os.path.join(video_frames_path, f"{frame_id:06d}.png")))
+        frames = np.array(frames)  # F x H x W x C
+        return frames
 
     def process_ag_video(self, video_name):
-        video = get_frames(os.path.join(self.ag_frames_dir, video_name))
+        video = self.get_frames(video_name)
         video = torch.from_numpy(video).permute(0, 3, 1, 2)[None].float()
-
         if torch.cuda.is_available():
             video = video.cuda()
-
         _, F, _, H, W = video.shape
         QUERY_FRAMES = [x for x in range(0, video.shape[1], self.interval)]
         all_tracks = np.zeros((F, 0, 2))
@@ -76,7 +90,6 @@ class AgCoTracker:
             all_visibilities = np.concatenate((all_visibilities, frame_visibilities), axis=1)
             all_confidences = np.concatenate((all_confidences, frame_confidences), axis=1)
             all_init_frames.extend(init_frames)
-
         feature_track_file_path = os.path.join(self.cotracker_dir, f"{video_name.split('.')[0]}.npz")
         np.savez(
             feature_track_file_path,
