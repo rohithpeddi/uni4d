@@ -22,8 +22,7 @@ class AgUniDepth:
         self.ag_root_dir = ag_root_dir
         self.is_v2 = is_v2
         self.use_gt_K = use_gt_K
-
-        self.batch_size = 8
+        self.batch_size = 1
         self.model = UniDepthV2.from_pretrained("lpiccinelli/unidepth-v2-vitl14")
         if torch.cuda.is_available():
             self.model = self.model.cuda()
@@ -60,53 +59,60 @@ class AgUniDepth:
         return frames
 
     def process_ag_video(self, video_name):
+        video_output_dir = os.path.join(self.unidepth_dir, video_name)
+        os.makedirs(video_output_dir, exist_ok=True)
+
         video = self.get_frames(video_name)
-        video = torch.from_numpy(video).permute(0, 3, 1, 2)[None].float()
+        video = torch.from_numpy(video)
         if torch.cuda.is_available():
             video = video.cuda()
         f, h, w, c = video.shape
         with torch.no_grad():
             frame_range = list(range(f))
-            chuncks = [frame_range[i:i + batch_size] for i in range(0, len(frame_range), batch_size)]
+            chuncks = [frame_range[i:i + self.batch_size] for i in range(0, len(frame_range), self.batch_size)]
             initial_intrinsics = []
             for chunk in chuncks:
-                imgs = images[chunk, ...]
+                imgs = video[chunk, ...]
                 imgs = torch.permute(imgs, (0, 3, 1, 2))
-                preds = model.infer(imgs)
+                preds = self.model.infer(imgs)
                 initial_intrinsics.append(preds['intrinsics'])
         initial_intrinsics = torch.cat(initial_intrinsics, dim=0)
         initial_intrinsics = torch.mean(initial_intrinsics, dim=0)
         K = initial_intrinsics.detach().cpu()
         K[0][-1] = w / 2
         K[1][-1] = h / 2
-        intrinsics_save_path = os.path.join(OUTPUT_BASE, 'intrinsics.npy')
-        depth_save_path_disp = os.path.join(OUTPUT_BASE, 'depth.npy')
+
+        intrinsics_save_path = os.path.join(video_output_dir, 'intrinsics.npy')
+        depth_save_path_disp = os.path.join(video_output_dir, 'depth.npy')
         np.save(intrinsics_save_path, K)
+
         if len(K.shape) == 2:
-            K = K.unsqueeze(0).repeat(images.shape[0], 1, 1)
+            K = K.unsqueeze(0).repeat(video.shape[0], 1, 1)
+
         depths = []
         with torch.no_grad():
             frame_range = list(range(f))
-            chuncks = [frame_range[i:i + batch_size] for i in range(0, len(frame_range), batch_size)]
+            chuncks = [frame_range[i:i + self.batch_size] for i in range(0, len(frame_range), self.batch_size)]
             for chunk in chuncks:
-                imgs = images[chunk, ...]
+                imgs = video[chunk, ...]
                 Ks = K[chunk, ...]
-                if isinstance(model, (UniDepthV2)):
+                if isinstance(self.model, (UniDepthV2)):
                     Ks = Pinhole(K=Ks)
                     cam = BatchCamera.from_camera(Ks)
                 imgs = torch.permute(imgs, (0, 3, 1, 2))
-                preds = model.infer(imgs, Ks)
+                preds = self.model.infer(imgs, Ks)
                 depth = preds['depth']  # B x 1 x H x W
                 depths.append(depth)
             depths = torch.cat(depths, dim=0)
             depths = depths.detach().cpu().numpy()
+
         depth_vis = depths[:, 0, :, :]
         disp_vis = 1 / (depth_vis + 1e-12)
         disp_vis = cv2.normalize(disp_vis, disp_vis, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         for f in range(len(disp_vis)):
             disp = disp_vis[f]
             disp = cv2.applyColorMap(disp, cv2.COLORMAP_JET)
-            imageio.imwrite(os.path.join(OUTPUT_BASE, str(f).zfill(4) + ".png"), disp)
+            imageio.imwrite(os.path.join(video_output_dir, str(f).zfill(4) + ".png"), disp)
         np.save(depth_save_path_disp, depths)
 
 

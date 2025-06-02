@@ -109,7 +109,7 @@ for video in tqdm(videos, desc="Predicting Unidepth"):
                 cam = BatchCamera.from_camera(Ks)
             imgs = torch.permute(imgs, (0, 3, 1, 2))
             preds = model.infer(imgs, Ks)
-            depth = preds['depth']                                         # B x 1 x H x W
+            depth = preds['depth']  # B x 1 x H x W
             depths.append(depth)
 
         depths = torch.cat(depths, dim=0)
