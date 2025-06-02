@@ -35,6 +35,25 @@ class Engine():
 
     def __init__(self, opt) -> None:
         self.opt = opt
+
+        self.video_name = opt.video
+        self.ag_root_dir = "/data/rohith/ag"
+        self.ag_frames_dir = os.path.join(self.ag_root_dir, "frames")
+        self.ag_4D_dir = os.path.join(self.ag_root_dir, "ag4D")
+        self.uni4D_dir = os.path.join(self.ag_4D_dir, "uni4D")
+
+        self.unidepth_dir = os.path.join(self.uni4D_dir, "unidepth")
+        self.gdino_output_dir = os.path.join(self.uni4D_dir, "gdino")
+        self.sam2_output_dir = os.path.join(self.uni4D_dir, "sam2")
+
+        self.frames_path = os.path.join(self.ag_root_dir, "frames")
+        self.annotations_path = os.path.join(self.ag_root_dir, "annotations")
+        self.video_list = sorted(os.listdir(self.frames_path))
+        self.gt_annotations = sorted(os.listdir(self.annotations_path))
+        self.cotracker_dir = os.path.join(self.uni4D_dir, "cotracker")
+        self.filtered_cotracker_dir = os.path.join(self.uni4D_dir, "cotracker_filtered")
+        os.makedirs(self.filtered_cotracker_dir, exist_ok=True)
+
         if opt.device == "cuda":
             self.device = torch.device("cuda")
 
@@ -461,19 +480,15 @@ class Engine():
         2 -> rejected
         Also erode and inflate dynamic masks for better boundaries
         """
-        deva_anot_path = os.path.join(self.opt.BASE, self.opt.dyn_mask_dir, "Annotations")
-        mask_paths = sorted(os.listdir(deva_anot_path))
+        video_mask_dir = os.path.join(self.sam2_output_dir, self.video_name, "mask")
+        mask_paths = os.listdir(video_mask_dir)
         all_masks = []
-        for mask_path in mask_paths:
-            if mask_path.endswith(".npy"):
-                mask_dyn = np.load(os.path.join(deva_anot_path, mask_path))
-                all_masks.append(mask_dyn)
-            elif mask_path.endswith(".png"):
-                mask_dyn = imageio.imread(os.path.join(deva_anot_path, mask_path))
-                if len(mask_dyn.shape) == 3:
-                    mask_dyn = mask_dyn.astype(np.int64)
-                    mask_dyn = mask_dyn[:, :, 0] + mask_dyn[:, :, 1] * 256 + mask_dyn[:, :, 2] * 256 * 256
-                all_masks.append(mask_dyn)
+        for mask in mask_paths:
+            mask_dyn = imageio.imread(os.path.join(video_mask_dir, mask))
+            if len(mask_dyn.shape) == 3:
+                mask_dyn = mask_dyn.astype(np.int64)
+                mask_dyn = mask_dyn[:, :, 0] + mask_dyn[:, :, 1] * 256 + mask_dyn[:, :, 2] * 256 * 256
+            all_masks.append(mask_dyn)
         masks = np.array(all_masks)
         _, masks_unique = np.unique(masks, return_inverse=True)
         dyn_masks = masks_unique.reshape(masks.shape)  # 0 -> static, 1+ -> dynamic
@@ -521,7 +536,7 @@ class Engine():
         Get depth map and intrinsics from unidepth
         """
         self.depth = []
-        depth_save_base = os.path.join(self.opt.workdir, self.opt.video_name, self.opt.depth_dir)
+        depth_save_base = os.path.join(self.unidepth_dir, self.video_name)
         depth_save_path_depth = os.path.join(depth_save_base, "depth.npy")
         intrinsics_save_path = os.path.join(depth_save_base, "intrinsics.npy")
         self.depth = torch.tensor(np.load(depth_save_path_depth))
@@ -533,7 +548,7 @@ class Engine():
         self.get_track_depths()
 
     def load_images(self):
-        image_paths_base = os.path.join(self.opt.BASE, "rgb")
+        image_paths_base = os.path.join(self.frames_path, self.video_name)
         image_paths = sorted([os.path.join(image_paths_base, x) for x in os.listdir(image_paths_base) if
                               x.endswith(".png") or x.endswith(".jpg")])
         self.images = []
@@ -547,16 +562,14 @@ class Engine():
 
     def load_tracklets(self):
         cotracker_dir = self.opt.cotracker_path
-
-        cotrack_results = np.load(os.path.join(self.opt.BASE, cotracker_dir, "results.npz"))
+        cotrack_results = np.load(os.path.join(self.cotracker_dir, f"{self.video_name[:-4]}.npz"))
         self.all_tracks = cotrack_results["all_tracks"]  # F x N x 2 (x,y)
         self.all_vis = cotrack_results["all_visibilities"]  # F x N
         self.track_init_frames = cotrack_results["init_frames"]  # N
 
         self.confidences = self.all_vis.copy().astype(np.float32)
 
-        save_path = os.path.join(self.opt.BASE, cotracker_dir, "filtered_results.npz")
-
+        save_path = os.path.join(self.filtered_cotracker_dir, f"{self.video_name[:-4]}.npz")
         self.filter_cotracker()
         np.savez_compressed(save_path, tracks=self.all_tracks, vis=self.all_vis, labels=self.all_labels)
 
@@ -588,9 +601,10 @@ class Engine():
         """
         Method used to load in rgb, cotrackers, and predict / store depth from unidepth
         """
-        self.opt.BASE = f"{self.opt.workdir}/{self.opt.video_name}"
-        self.opt.output_dir = f"{self.opt.workdir}/{self.opt.video_name}/uni4d/{self.opt.experiment_name}"
+        # self.opt.BASE = f"{self.opt.workdir}/{self.opt.video_name}"
+        # self.opt.output_dir = f"{self.opt.workdir}/{self.opt.video_name}/uni4d/{self.opt.experiment_name}"
 
+        self.opt.output_dir = f"{self.uni4D_dir}/output/{self.video_name}/{self.opt.experiment_name}"
         os.makedirs(self.opt.output_dir, exist_ok=True)
         if self.opt.log:
             reload(logging)
@@ -607,7 +621,6 @@ class Engine():
         self.load_images()
         self.get_masks()
         self.load_tracklets()
-        self.load_gt()
         self.load_depths()
 
     def reset_schedulers(self, patience=10):

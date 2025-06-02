@@ -5,6 +5,12 @@ import torch
 from engine import Engine
 
 
+class AgEngine:
+
+    def __init__(self):
+        pass
+
+
 def parse_args(input_string=None):
     parser = configargparse.ArgParser()
 
@@ -38,63 +44,45 @@ def parse_args(input_string=None):
     parser.add_argument('--deterministic', action='store_true',
                         help='whether to use deterministic mode for consistent results')
     parser.add_argument('--seed', type=int, default=42, help='seed num')
-
     if input_string is not None:
         opt = parser.parse_args(input_string)
     else:
         opt = parser.parse_args()
-
     return opt
 
 
 def train_from_opt(opt):
     engine = Engine(opt)
     engine.initialize()
-
     engine.optimize_init()
     engine.log_timer("init")
-
     engine.optimize_BA()
     engine.reinitialize_static()  # add more static points
     engine.log_timer("BA")
-
     if engine.num_points_dyn > 0:
         engine.init_dyn_cp()
         engine.optimize_dyn()
         engine.filter_dyn()
         engine.log_timer("dyn")
-
     engine.save_results(save_fused_points=opt.vis_4d)
     del engine
 
 
 def main():
     opt = parse_args()
-
     os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu
     os.environ['NUMEXPR_MAX_THREADS'] = '32'
-
     if opt.video == "None":
-
         videos = sorted(os.listdir(f"{opt.workdir}"))
-
         for i, video in enumerate(videos):
             print(f"Working on {video}", flush=True)
-
             opt.video_name = video
-
             train_from_opt(opt)
-
             torch.cuda.empty_cache()
-
     else:
-
         print(f"Working on {opt.video}", flush=True)
-
         opt.video_name = opt.video
-
         train_from_opt(opt)
-
         torch.cuda.empty_cache()
 
 
