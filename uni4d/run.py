@@ -4,15 +4,16 @@ import torch
 
 from engine import Engine
 
-def parse_args(input_string=None):
 
+def parse_args(input_string=None):
     parser = configargparse.ArgParser()
 
     parser.add_argument('--config', is_config_file=True, default="./config/config_static.yaml", help='config file path')
     parser.add_argument('--gpu', type=str, default='0', help='gpu')
     parser.add_argument('--workdir', type=str, default='workdir', help='workdir')
     parser.add_argument('--intrinsics_lr', type=float, default=1e-3, help='intrinsics learning rate')
-    parser.add_argument('--cp_translation_dyn_lr', type=float, default=1e-3, help='dyn points translation learning rate')
+    parser.add_argument('--cp_translation_dyn_lr', type=float, default=1e-3,
+                        help='dyn points translation learning rate')
     parser.add_argument('--uncertainty_lr', type=float, default=1e-4, help='uncertainty learning rate')
     parser.add_argument('--ba_lr', type=float, default=1e-2, help='bundle adjustment learning rate')
     parser.add_argument('--device', type=str, default='cuda', help='device')
@@ -34,9 +35,10 @@ def parse_args(input_string=None):
     parser.add_argument('--video', type=str, help='winit_optimizhich video to work on')
     parser.add_argument('--loss_fn', type=str, help='which loss function to use')
     parser.add_argument('--print_every', type=int, default=20, help='print every')
-    parser.add_argument('--deterministic', action='store_true', help='whether to use deterministic mode for consistent results')
+    parser.add_argument('--deterministic', action='store_true',
+                        help='whether to use deterministic mode for consistent results')
     parser.add_argument('--seed', type=int, default=42, help='seed num')
-    
+
     if input_string is not None:
         opt = parser.parse_args(input_string)
     else:
@@ -44,8 +46,8 @@ def parse_args(input_string=None):
 
     return opt
 
-def train_from_opt(opt):
 
+def train_from_opt(opt):
     engine = Engine(opt)
     engine.initialize()
 
@@ -53,18 +55,19 @@ def train_from_opt(opt):
     engine.log_timer("init")
 
     engine.optimize_BA()
-    engine.reinitialize_static()             # add more static points
+    engine.reinitialize_static()  # add more static points
     engine.log_timer("BA")
 
     if engine.num_points_dyn > 0:
         engine.init_dyn_cp()
         engine.optimize_dyn()
         engine.filter_dyn()
-        engine.log_timer("dyn")    
+        engine.log_timer("dyn")
 
     engine.save_results(save_fused_points=opt.vis_4d)
 
     del engine
+
 
 def main():
     opt = parse_args()
@@ -77,11 +80,10 @@ def main():
         videos = sorted(os.listdir(f"{opt.workdir}"))
 
         for i, video in enumerate(videos):
-
             print(f"Working on {video}", flush=True)
 
             opt.video_name = video
-            
+
             train_from_opt(opt)
 
             torch.cuda.empty_cache()
@@ -91,10 +93,11 @@ def main():
         print(f"Working on {opt.video}", flush=True)
 
         opt.video_name = opt.video
-        
+
         train_from_opt(opt)
 
         torch.cuda.empty_cache()
+
 
 if __name__ == '__main__':
     main()
