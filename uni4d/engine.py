@@ -16,9 +16,9 @@ import torch.nn.functional as F
 
 from pytorch3d.ops import knn_points
 
-from util import clean_depth_outliers, EarlyStopper, KeyFrameBuffer, l1_loss_with_uncertainty, flow_norm
+from uni4d.util import clean_depth_outliers, EarlyStopper, KeyFrameBuffer, l1_loss_with_uncertainty, flow_norm
 
-from variables import CameraPoseDeltaCollection, ControlPoints, CameraIntrinsics, ControlPointsDynamic
+from uni4d.variables import CameraPoseDeltaCollection, ControlPoints, CameraIntrinsics, ControlPointsDynamic
 
 import os
 import wandb
@@ -484,6 +484,8 @@ class Engine():
         mask_paths = os.listdir(video_mask_dir)
         all_masks = []
         for mask in mask_paths:
+            if not mask.endswith(".png"):
+                continue
             mask_dyn = imageio.imread(os.path.join(video_mask_dir, mask))
             if len(mask_dyn.shape) == 3:
                 mask_dyn = mask_dyn.astype(np.int64)
@@ -1476,8 +1478,7 @@ class Engine():
 
         static_cam_from = torch.einsum("bji,bni->bnj", torch.linalg.inv(K_from), static_homo_from)
         static_cam_from = static_cam_from / (static_cam_from[:, :, 2].unsqueeze(-1) + 1e-16)
-        static_cam_from = static_cam_from * self.all_tracks_static_depth[all_pairs[:, 0]].unsqueeze(
-            -1)  # project into 3D
+        static_cam_from = static_cam_from * self.all_tracks_static_depth[all_pairs[:, 0]].unsqueeze(-1)  # project into 3D
 
         static_world_from = torch.einsum("bni,bmi->bmn", Rs_from, static_cam_from) + ts_from.permute(0, 2,
                                                                                                      1)  # F x N x 3
