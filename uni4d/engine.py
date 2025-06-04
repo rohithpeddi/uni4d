@@ -1,3 +1,5 @@
+import pickle
+
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import numpy as np
@@ -53,6 +55,13 @@ class Engine():
         self.cotracker_dir = os.path.join(self.uni4D_dir, "cotracker")
         self.filtered_cotracker_dir = os.path.join(self.uni4D_dir, "cotracker_filtered")
         os.makedirs(self.filtered_cotracker_dir, exist_ok=True)
+
+        video_id_frame_id_list_pkl_file_path = os.path.join(self.ag_root_dir, "4d_video_frame_id_list.pkl")
+        if os.path.exists(video_id_frame_id_list_pkl_file_path):
+            with open(video_id_frame_id_list_pkl_file_path, "rb") as f:
+                self.video_id_frame_id_list = pickle.load(f)
+        else:
+            assert False, f"Please generate {video_id_frame_id_list_pkl_file_path} first"
 
         if opt.device == "cuda":
             self.device = torch.device("cuda")
@@ -550,14 +559,15 @@ class Engine():
         self.get_track_depths()
 
     def load_images(self):
-        image_paths_base = os.path.join(self.frames_path, self.video_name)
-        image_paths = sorted([os.path.join(image_paths_base, x) for x in os.listdir(image_paths_base) if
-                              x.endswith(".png") or x.endswith(".jpg")])
+        # image_paths_base = os.path.join(self.frames_path, self.video_name)
+        # image_paths = sorted([os.path.join(image_paths_base, x) for x in os.listdir(image_paths_base) if
+        #                       x.endswith(".png") or x.endswith(".jpg")])
         self.images = []
-        for image_path in image_paths:
-            im = imageio.imread(image_path)
-            self.images.append(im)
-
+        video_frames_path = os.path.join(self.frames_path, self.video_name)
+        frame_id_list = self.video_id_frame_id_list[self.video_name]
+        frame_id_list = sorted(np.unique(frame_id_list))
+        for frame_id in frame_id_list:
+            self.images.append(imageio.imread(os.path.join(video_frames_path, f"{frame_id:06d}.png")))
         self.images = torch.tensor(np.array(self.images))  # F x H x W x 3
         self.num_frames, self.height, self.width, _ = self.images.shape
         self.shape = (self.height, self.width)
@@ -1451,7 +1461,7 @@ class Engine():
         self.optimize_over_keyframe_buffer()
         self.freeze_frame(self.keyframe_buffer.buffer[0])
 
-        for x in range(2, self.num_frames):
+        for x in tqdm(range(2, self.num_frames)):
             self.keyframe_buffer.add_keyframe(x)
 
             self.init_pose(x)  # just use the previous frame as init

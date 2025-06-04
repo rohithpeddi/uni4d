@@ -33,15 +33,24 @@ class AgEngine:
         engine.optimize_init()
         engine.log_timer("init")
 
+        print("Optimizing bundle adjustment for video:", video_name)
         engine.optimize_BA()
 
+        print("Reinitializing static points for video:", video_name)
         engine.reinitialize_static()  # add more static points
 
         engine.log_timer("BA")
         if engine.num_points_dyn > 0:
+            print("Initializing dynamic control points for video:", video_name)
             engine.init_dyn_cp()
+
+            print("Optimizing dynamic points for video:", video_name)
             engine.optimize_dyn()
+
+            print("Filtering dynamic points for video:", video_name)
             engine.filter_dyn()
             engine.log_timer("dyn")
+
+        print("Saving results for video:", video_name)
         engine.save_results(save_fused_points=self.opt.vis_4d)
         del engine
