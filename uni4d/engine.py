@@ -1454,7 +1454,7 @@ class Engine():
         logging.info("Optimized variables are: ")
         logging.info(self.active_optimizers)
 
-        self.keyframe_buffer = KeyFrameBuffer(buffer_size=5)
+        self.keyframe_buffer = KeyFrameBuffer(buffer_size=10)
         self.keyframe_buffer.add_keyframe(0)
         self.keyframe_buffer.add_keyframe(1)
 
