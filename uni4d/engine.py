@@ -48,8 +48,8 @@ class Engine():
 
         self.unidepth_dir = os.path.join(self.uni4D_dir, "unidepth")
         self.gdino_output_dir = os.path.join(self.uni4D_dir, "gdino")
-        # self.sam2_output_dir = os.path.join(self.uni4D_dir, "sam2")
-        self.gdino_mask_output_dir = os.path.join(self.uni4D_dir, "gdino_mask")
+        self.sam2_output_dir = os.path.join(self.uni4D_dir, "sam2")
+        # self.gdino_mask_output_dir = os.path.join(self.uni4D_dir, "gdino_mask")
 
         self.frames_path = os.path.join(self.ag_root_dir, "frames")
         self.annotations_path = os.path.join(self.ag_root_dir, "annotations")
@@ -499,7 +499,7 @@ class Engine():
         2 -> rejected
         Also erode and inflate dynamic masks for better boundaries
         """
-        video_mask_dir = os.path.join(self.gdino_mask_output_dir, self.video_name, "mask")
+        video_mask_dir = os.path.join(self.sam2_output_dir, self.video_name, "mask")
         mask_paths = os.listdir(video_mask_dir)
         all_masks = []
         for mask in mask_paths:
@@ -1501,8 +1501,7 @@ class Engine():
         static_cam_from = static_cam_from * self.all_tracks_static_depth[all_pairs[:, 0]].unsqueeze(
             -1)  # project into 3D
 
-        static_world_from = torch.einsum("bni,bmi->bmn", Rs_from, static_cam_from) + ts_from.permute(0, 2,
-                                                                                                     1)  # F x N x 3
+        static_world_from = torch.einsum("bni,bmi->bmn", Rs_from, static_cam_from) + ts_from.permute(0, 2, 1)  # F x N x 3
 
         static_cam_to = torch.einsum("bin,bmi->bmn", Rs_to, static_world_from - ts_to.permute(0, 2, 1))  # F x N x 3
 

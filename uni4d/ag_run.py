@@ -34,6 +34,7 @@ class AgEngine:
             return
 
         init_cam_dict = torch.load(cut3r_video_output_path)["cam_dict"]
+        # init_cam_dict = None
 
         engine = Engine(self.opt, init_cam_dict=init_cam_dict)
         self.opt.video_name = video_name
