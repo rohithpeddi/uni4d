@@ -73,6 +73,71 @@ def hat(v: torch.Tensor) -> torch.Tensor:
 
     return h
 
+
+@torch.jit.script
+def _so3_log_map(
+    R: torch.Tensor,
+    eps: float = 1e-6
+) -> torch.Tensor:
+    """
+    Compute the so(3) logarithm map for a batch of rotation matrices R.
+    Inputs:
+      • R:  Tensor of shape (N, 3, 3), each entry is a rotation matrix in SO(3).
+      • eps: small constant to avoid numerical issues when angle ~ 0 or π.
+    Output:
+      • log_rot: Tensor of shape (N, 3), where each row is the rotation vector
+                 (axis * angle) whose exp_map would yield R.
+    """
+    # R’s diagonal trace: trace(R) = R₀₀ + R₁₁ + R₂₂
+    # cosθ = (trace(R) - 1) / 2
+    diag_sum = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+    cos_theta = (diag_sum - 1.0) * 0.5
+    # clamp into valid range to avoid NaNs from acos
+    cos_theta = torch.clamp(cos_theta, -1.0 + eps, 1.0 - eps)
+
+    # rotation angle θ ∈ [0, π]
+    theta = torch.acos(cos_theta)
+
+    # sinθ might be very small near 0 or π; guard against division by zero
+    sin_theta = torch.sin(theta)
+    # Wherever sinθ is very small, we’ll switch to a safe fallback later.
+    small_mask = sin_theta.abs() < eps
+
+    # Form (R - Rᵀ), which is 2·[ω]_×  when R = exp([ω]_×)
+    R_minus_RT = R - R.transpose(1, 2)
+    # For general θ, [ω]_× = (θ / (2·sinθ)) * (R - Rᵀ)
+    # => skew = [ω]_×  is the Lie‐algebra element. Then log_rot = vee(skew).
+    coeff = theta / (2.0 * sin_theta)
+    coeff = coeff.unsqueeze(1).unsqueeze(2)  # shape (N,1,1)
+    skew_mat = coeff * R_minus_RT            # shape (N,3,3)
+
+    # vee( [ω]_× ) = [ skew_mat[2,1], skew_mat[0,2], skew_mat[1,0] ]
+    log_rot = torch.stack([
+        skew_mat[:, 2, 1],
+        skew_mat[:, 0, 2],
+        skew_mat[:, 1, 0],
+    ], dim=1)  # shape (N, 3)
+
+    # --- Handle the "small‐angle" case via Taylor expansion: ---
+    # When θ ≈ 0, sinθ → 0, so coeff blows up. In that regime, we know
+    #   R ≈ I + [ω]_×  ⇒  [ω]_× ≈ (R - Rᵀ)/2  and  ||ω|| = θ.
+    # Equivalently, for very small θ, one can set:
+    #   log_rot ≈ vee((R - Rᵀ)/2).
+    if small_mask.any():
+        # Compute fallback skew for those entries:
+        half_diff = 0.5 * R_minus_RT[small_mask]  # shape (M,3,3) for M “small” indices
+        # vee of half_diff:
+        fallback = torch.stack([
+            half_diff[:, 2, 1],
+            half_diff[:, 0, 2],
+            half_diff[:, 1, 0],
+        ], dim=1)  # shape (M,3)
+        # Overwrite only those “small‐angle” rows in log_rot
+        log_rot[small_mask] = fallback
+
+    return log_rot
+
+
 @torch.jit.script
 def _so3_exp_map(log_rot: torch.Tensor, eps: float = 0.0001):
     """
@@ -475,18 +540,31 @@ class CameraPoseDeltaCollectionv2(torch.nn.Module):
         return R, delta_translation
 
 class CameraPoseDeltaCollection(torch.nn.Module):
-    def __init__(self, number_of_points=10) -> None:
+
+    def __init__(self, number_of_points=10, Rs=None, ts=None) -> None:
         super().__init__()
         zero_rotation = torch.ones([1, 3]) * 1e-3
         zero_translation = torch.zeros([1, 3, 1]) + 1e-4
-        for n in range(number_of_points):
-            self.register_parameter(
-                f"delta_rotation_{n}", nn.Parameter(zero_rotation))
-            self.register_parameter(
-                f"delta_translation_{n}", nn.Parameter(zero_translation)
-            )
-        self.register_buffer("zero_rotation", torch.eye(3)[None, ...])
-        self.register_buffer("zero_translation", torch.zeros([1, 3, 1]))
+
+        if Rs is not None and ts is not None:
+            assert Rs.shape[0] == number_of_points, "Number of rotations must match number of points"
+            assert ts.shape[0] == number_of_points, "Number of translations must match number of points"
+            Rs = _so3_log_map(Rs)
+            for n in range(number_of_points):
+                delta_rotation_n = Rs[n]
+                delta_translation_n = ts[n]
+                self.register_parameter(f"delta_rotation_{n}", nn.Parameter(delta_rotation_n))
+                self.register_parameter(f"delta_translation_{n}", nn.Parameter(delta_translation_n))
+        else:
+            for n in range(number_of_points):
+                self.register_parameter(
+                    f"delta_rotation_{n}", nn.Parameter(zero_rotation))
+                self.register_parameter(
+                    f"delta_translation_{n}", nn.Parameter(zero_translation)
+                )
+            self.register_buffer("zero_rotation", torch.eye(3)[None, ...])
+            self.register_buffer("zero_translation", torch.zeros([1, 3, 1]))
+
         self.traced_so3_exp_map = None
         self.number_of_points = number_of_points
 

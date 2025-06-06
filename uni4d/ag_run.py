@@ -1,5 +1,7 @@
 import os
 
+import torch
+
 from uni4d.engine import Engine
 
 
@@ -22,8 +24,18 @@ class AgEngine:
         self.video_list = sorted(os.listdir(self.frames_path))
         self.gt_annotations = sorted(os.listdir(self.annotations_path))
 
+        self.cut3r_dir = os.path.join(self.ag_4D_dir, "cut3r")
+
     def process_ag_video(self, video_name):
-        engine = Engine(self.opt)
+
+        cut3r_video_output_path = os.path.join(self.cut3r_dir, f"{video_name[:-4]}.pkl")
+        if not os.path.exists(cut3r_video_output_path):
+            print(f"Cut3R output for {video_name} not found. Skipping video.")
+            return
+
+        init_cam_dict = torch.load(cut3r_video_output_path)["cam_dict"]
+
+        engine = Engine(self.opt, init_cam_dict=init_cam_dict)
         self.opt.video_name = video_name
         engine.video_name = video_name
         print("Initializing engine for video:", video_name)
