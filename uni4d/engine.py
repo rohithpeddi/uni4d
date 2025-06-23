@@ -35,8 +35,10 @@ import time
 
 class Engine():
 
-    def __init__(self, opt) -> None:
+    def __init__(self, opt, init_cam_dict=None) -> None:
         self.opt = opt
+
+        self.init_cam_dict = init_cam_dict
 
         self.video_name = opt.video
         self.ag_root_dir = "/data/rohith/ag"
@@ -47,6 +49,7 @@ class Engine():
         self.unidepth_dir = os.path.join(self.uni4D_dir, "unidepth")
         self.gdino_output_dir = os.path.join(self.uni4D_dir, "gdino")
         self.sam2_output_dir = os.path.join(self.uni4D_dir, "sam2")
+        # self.gdino_mask_output_dir = os.path.join(self.uni4D_dir, "gdino_mask")
 
         self.frames_path = os.path.join(self.ag_root_dir, "frames")
         self.annotations_path = os.path.join(self.ag_root_dir, "annotations")
@@ -81,7 +84,14 @@ class Engine():
         self.controlpoints_static = ControlPoints(number_of_points=self.num_points_static)
         self.controlpoints_dyn = ControlPointsDynamic(number_of_points=self.num_points_dyn,
                                                       number_of_frames=self.num_frames, with_norm=False)
-        self.poses = CameraPoseDeltaCollection(self.num_frames)
+
+        if self.init_cam_dict:
+            print("Initialized camera poses from CUT3R")
+            Rs = torch.Tensor(self.init_cam_dict["R"]).to(self.device)
+            ts = torch.Tensor(self.init_cam_dict["t"]).to(self.device)
+            self.poses = CameraPoseDeltaCollection(self.num_frames, Rs=Rs, ts=ts)
+        else:
+            self.poses = CameraPoseDeltaCollection(self.num_frames)
 
         if self.opt.opt_intrinsics:
             self.intrinsics = CameraIntrinsics(self.K[0, 0], self.K[1, 1])
@@ -1454,7 +1464,7 @@ class Engine():
         logging.info("Optimized variables are: ")
         logging.info(self.active_optimizers)
 
-        self.keyframe_buffer = KeyFrameBuffer(buffer_size=5)
+        self.keyframe_buffer = KeyFrameBuffer(buffer_size=10)
         self.keyframe_buffer.add_keyframe(0)
         self.keyframe_buffer.add_keyframe(1)
 
@@ -1488,10 +1498,10 @@ class Engine():
 
         static_cam_from = torch.einsum("bji,bni->bnj", torch.linalg.inv(K_from), static_homo_from)
         static_cam_from = static_cam_from / (static_cam_from[:, :, 2].unsqueeze(-1) + 1e-16)
-        static_cam_from = static_cam_from * self.all_tracks_static_depth[all_pairs[:, 0]].unsqueeze(-1)  # project into 3D
+        static_cam_from = static_cam_from * self.all_tracks_static_depth[all_pairs[:, 0]].unsqueeze(
+            -1)  # project into 3D
 
-        static_world_from = torch.einsum("bni,bmi->bmn", Rs_from, static_cam_from) + ts_from.permute(0, 2,
-                                                                                                     1)  # F x N x 3
+        static_world_from = torch.einsum("bni,bmi->bmn", Rs_from, static_cam_from) + ts_from.permute(0, 2, 1)  # F x N x 3
 
         static_cam_to = torch.einsum("bin,bmi->bmn", Rs_to, static_world_from - ts_to.permute(0, 2, 1))  # F x N x 3
 

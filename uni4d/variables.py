@@ -5,6 +5,7 @@ from torch.nn import functional as F
 import math
 from pytorch3d.transforms import so3_exp_map, so3_log_map
 
+
 def quaternion_to_matrix(quaternions):
     """
     Convert rotations given as quaternions to rotation matrices.
@@ -34,6 +35,7 @@ def quaternion_to_matrix(quaternions):
         -1,
     )
     return o.reshape(quaternions.shape[:-1] + (3, 3))
+
 
 @torch.jit.script
 def hat(v: torch.Tensor) -> torch.Tensor:
@@ -73,6 +75,71 @@ def hat(v: torch.Tensor) -> torch.Tensor:
 
     return h
 
+
+@torch.jit.script
+def _so3_log_map(
+        R: torch.Tensor,
+        eps: float = 1e-6
+) -> torch.Tensor:
+    """
+    Compute the so(3) logarithm map for a batch of rotation matrices R.
+    Inputs:
+      • R:  Tensor of shape (N, 3, 3), each entry is a rotation matrix in SO(3).
+      • eps: small constant to avoid numerical issues when angle ~ 0 or π.
+    Output:
+      • log_rot: Tensor of shape (N, 3), where each row is the rotation vector
+                 (axis * angle) whose exp_map would yield R.
+    """
+    # R’s diagonal trace: trace(R) = R₀₀ + R₁₁ + R₂₂
+    # cosθ = (trace(R) - 1) / 2
+    diag_sum = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+    cos_theta = (diag_sum - 1.0) * 0.5
+    # clamp into valid range to avoid NaNs from acos
+    cos_theta = torch.clamp(cos_theta, -1.0 + eps, 1.0 - eps)
+
+    # rotation angle θ ∈ [0, π]
+    theta = torch.acos(cos_theta)
+
+    # sinθ might be very small near 0 or π; guard against division by zero
+    sin_theta = torch.sin(theta)
+    # Wherever sinθ is very small, we’ll switch to a safe fallback later.
+    small_mask = sin_theta.abs() < eps
+
+    # Form (R - Rᵀ), which is 2·[ω]_×  when R = exp([ω]_×)
+    R_minus_RT = R - R.transpose(1, 2)
+    # For general θ, [ω]_× = (θ / (2·sinθ)) * (R - Rᵀ)
+    # => skew = [ω]_×  is the Lie‐algebra element. Then log_rot = vee(skew).
+    coeff = theta / (2.0 * sin_theta)
+    coeff = coeff.unsqueeze(1).unsqueeze(2)  # shape (N,1,1)
+    skew_mat = coeff * R_minus_RT  # shape (N,3,3)
+
+    # vee( [ω]_× ) = [ skew_mat[2,1], skew_mat[0,2], skew_mat[1,0] ]
+    log_rot = torch.stack([
+        skew_mat[:, 2, 1],
+        skew_mat[:, 0, 2],
+        skew_mat[:, 1, 0],
+    ], dim=1)  # shape (N, 3)
+
+    # --- Handle the "small‐angle" case via Taylor expansion: ---
+    # When θ ≈ 0, sinθ → 0, so coeff blows up. In that regime, we know
+    #   R ≈ I + [ω]_×  ⇒  [ω]_× ≈ (R - Rᵀ)/2  and  ||ω|| = θ.
+    # Equivalently, for very small θ, one can set:
+    #   log_rot ≈ vee((R - Rᵀ)/2).
+    if small_mask.any():
+        # Compute fallback skew for those entries:
+        half_diff = 0.5 * R_minus_RT[small_mask]  # shape (M,3,3) for M “small” indices
+        # vee of half_diff:
+        fallback = torch.stack([
+            half_diff[:, 2, 1],
+            half_diff[:, 0, 2],
+            half_diff[:, 1, 0],
+        ], dim=1)  # shape (M,3)
+        # Overwrite only those “small‐angle” rows in log_rot
+        log_rot[small_mask] = fallback
+
+    return log_rot
+
+
 @torch.jit.script
 def _so3_exp_map(log_rot: torch.Tensor, eps: float = 0.0001):
     """
@@ -95,12 +162,13 @@ def _so3_exp_map(log_rot: torch.Tensor, eps: float = 0.0001):
 
     R = (
         # pyre-fixme[16]: `float` has no attribute `__getitem__`.
-        fac1[:, None, None] * skews
-        + fac2[:, None, None] * skews_square
-        + torch.eye(3, dtype=log_rot.dtype, device=log_rot.device)[None]
+            fac1[:, None, None] * skews
+            + fac2[:, None, None] * skews_square
+            + torch.eye(3, dtype=log_rot.dtype, device=log_rot.device)[None]
     )
 
     return R, rot_angles, skews, skews_square
+
 
 class CameraIntrinsics(nn.Module):
     def __init__(self, init_focal_lengthx=1, init_focal_lengthy=1):
@@ -127,10 +195,11 @@ class CameraIntrinsics(nn.Module):
         else:
             return intrinsics_mat
 
+
 def signed_expm1(x):
     sign = torch.sign(x)
     return sign * torch.expm1(torch.abs(x))
-        
+
 
 # class DepthScaleShiftCollection(torch.nn.Module):
 #     def __init__(self, n_points=10, use_inverse=False, grid_size=1):
@@ -142,7 +211,7 @@ def signed_expm1(x):
 #     def forward(self):
 
 #         return self.shift
-    
+
 #     def get_scale_data(self):
 
 #         if self.grid_size != 1:
@@ -160,8 +229,7 @@ class DepthShiftCollection(torch.nn.Module):
     def forward(self):
         return torch.exp(self.shift)
 
-    
-        
+
 class DepthScaleShiftCollection(torch.nn.Module):
     def __init__(self, n_points=10, use_inverse=False, grid_size=1):
         super().__init__()
@@ -205,9 +273,9 @@ class DepthScaleShiftCollection(torch.nn.Module):
             scale = F.interpolate(scale, self.output_shape,
                                   mode='bilinear', align_corners=True)
         return scale
-    
-class UncertaintyCollectionTracks(torch.nn.Module):
 
+
+class UncertaintyCollectionTracks(torch.nn.Module):
     """
     Direct optimization of weights for point clouds (includes both static and dynamic components)
     We take ELU so that weights are always positive
@@ -225,16 +293,15 @@ class UncertaintyCollectionTracks(torch.nn.Module):
 
     def get_params(self):
         return self.uncertainty
-    
-    def forward(self, points=None):
 
+    def forward(self, points=None):
         if points is None:
             points = torch.arange(self.number_of_points)
 
-        return self.ELU(self.uncertainty[points]) + 1 # add 1 for it to be positive
-    
-class UncertaintyCollection(torch.nn.Module):
+        return self.ELU(self.uncertainty[points]) + 1  # add 1 for it to be positive
 
+
+class UncertaintyCollection(torch.nn.Module):
     """
     Direct optimization of weights for point clouds (includes both static and dynamic components)
     We take ELU so that weights are always positive
@@ -252,7 +319,7 @@ class UncertaintyCollection(torch.nn.Module):
 
     def get_params(self):
         return self.uncertainty
-    
+
     def forward(self, frames=None, points=None):
 
         if points is None:
@@ -261,10 +328,10 @@ class UncertaintyCollection(torch.nn.Module):
         if frames is None:
             frames = torch.arange(self.number_of_frames)
 
-        return self.ELU(self.uncertainty[points][:, frames]) + 1 # add 1 for it to be positive
-    
-class ControlPointsDynamic(torch.nn.Module):
+        return self.ELU(self.uncertainty[points][:, frames]) + 1  # add 1 for it to be positive
 
+
+class ControlPointsDynamic(torch.nn.Module):
     """
     Optimized pose for control points. Note that transformation is relative to an undefined canonical space.
     Seems like more efficient to initialize as a grid? n x f x 7
@@ -272,17 +339,17 @@ class ControlPointsDynamic(torch.nn.Module):
 
     def __init__(self, with_norm=False, number_of_points=10, number_of_frames=10) -> None:
         super().__init__()
-        zero_translation = torch.zeros([number_of_points, number_of_frames, 3]) + 1e-4 
+        zero_translation = torch.zeros([number_of_points, number_of_frames, 3]) + 1e-4
 
-        self.register_parameter("delta_translation", nn.Parameter(zero_translation)) # N x F x 3
-        
+        self.register_parameter("delta_translation", nn.Parameter(zero_translation))  # N x F x 3
+
         self.number_of_points = number_of_points
         self.number_of_frames = number_of_frames
         self.with_norm = with_norm
 
         if with_norm:
             zero_normal = torch.zeros([number_of_points, number_of_frames, 3]) + 1e-4
-            self.register_parameter("delta_normal", nn.Parameter(zero_normal)) # N x 3
+            self.register_parameter("delta_normal", nn.Parameter(zero_normal))  # N x 3
 
     def get_params(self):
 
@@ -290,7 +357,7 @@ class ControlPointsDynamic(torch.nn.Module):
             norm = self.delta_normal
         else:
             norm = None
-        
+
         return self.delta_translation, norm
 
     def set_translation(self, frame, translation):
@@ -307,7 +374,7 @@ class ControlPointsDynamic(torch.nn.Module):
         if point_idx is None:
             point_idx = torch.arange(self.number_of_points)
 
-        translation = self.delta_translation[point_idx][:,frame, :]
+        translation = self.delta_translation[point_idx][:, frame, :]
 
         if self.with_norm:
             norm = self.delta_normal[point_idx][:, frame, :]
@@ -316,14 +383,14 @@ class ControlPointsDynamic(torch.nn.Module):
             norm = None
 
         return translation, norm
-    
+
     def get_translation(self, frame):
 
         """
         Returns the translation for all points for the given frame.
         """
-        
-        return self.delta_translation[:,frame,:]
+
+        return self.delta_translation[:, frame, :]
 
     def forward(self, frames=None, points=None):
 
@@ -340,12 +407,12 @@ class ControlPointsDynamic(torch.nn.Module):
         if isinstance(frames, int):
             frames = [frames]
 
-        t_out, norm = self.get_raw_value(points, frames)    
+        t_out, norm = self.get_raw_value(points, frames)
 
         return t_out, norm
 
-class ControlPoints(torch.nn.Module):
 
+class ControlPoints(torch.nn.Module):
     """
     Optimized pose for control points. Note that transformation is relative to an undefined canonical space.
     Seems like more efficient to initialize as a grid? n x f x 7
@@ -353,22 +420,20 @@ class ControlPoints(torch.nn.Module):
 
     def __init__(self, number_of_points=10) -> None:
         super().__init__()
-        zero_translation = torch.zeros([number_of_points, 3]) + 1e-4 
+        zero_translation = torch.zeros([number_of_points, 3]) + 1e-4
 
-        self.register_parameter("delta_translation", nn.Parameter(zero_translation)) # N x 3
-        
+        self.register_parameter("delta_translation", nn.Parameter(zero_translation))  # N x 3
+
         self.number_of_points = number_of_points
 
     def set_translation(self, point_idx, translation):
-        assert(len(point_idx) == len(translation))
+        assert (len(point_idx) == len(translation))
         self.delta_translation.data[point_idx] = translation.detach().clone()
 
     def get_param(self):
-
         return self.delta_translation
-    
-    def forward(self, points=None):
 
+    def forward(self, points=None):
         """
         Returns all the translations for the given points.
         returns:
@@ -377,10 +442,11 @@ class ControlPoints(torch.nn.Module):
 
         if points is None:
             points = torch.arange(self.number_of_points)
-  
+
         t_out = self.delta_translation[points]
 
-        return  t_out
+        return t_out
+
 
 class CameraPoseDeltaCollectionv2(torch.nn.Module):
     def __init__(self, number_of_points=10) -> None:
@@ -458,8 +524,8 @@ class CameraPoseDeltaCollectionv2(torch.nn.Module):
         if self.traced_so3_exp_map is None:
             self.traced_so3_exp_map = torch.jit.trace(
                 _so3_exp_map, (se_3,))
-        R_out = _so3_exp_map(se_3)[0] # returns rotation matrix
-        R_out = torch.bmm(R_out, act_rot)    # add delta to original
+        R_out = _so3_exp_map(se_3)[0]  # returns rotation matrix
+        R_out = torch.bmm(R_out, act_rot)  # add delta to original
 
         return R_out, t_out
 
@@ -474,19 +540,33 @@ class CameraPoseDeltaCollectionv2(torch.nn.Module):
         R = _so3_exp_map(delta_rotation)[0]
         return R, delta_translation
 
+
 class CameraPoseDeltaCollection(torch.nn.Module):
-    def __init__(self, number_of_points=10) -> None:
+
+    def __init__(self, number_of_points=10, Rs=None, ts=None) -> None:
         super().__init__()
         zero_rotation = torch.ones([1, 3]) * 1e-3
         zero_translation = torch.zeros([1, 3, 1]) + 1e-4
-        for n in range(number_of_points):
-            self.register_parameter(
-                f"delta_rotation_{n}", nn.Parameter(zero_rotation))
-            self.register_parameter(
-                f"delta_translation_{n}", nn.Parameter(zero_translation)
-            )
-        self.register_buffer("zero_rotation", torch.eye(3)[None, ...])
-        self.register_buffer("zero_translation", torch.zeros([1, 3, 1]))
+
+        if Rs is not None and ts is not None:
+            assert Rs.shape[0] == number_of_points, "Number of rotations must match number of points"
+            assert ts.shape[0] == number_of_points, "Number of translations must match number of points"
+            Rs = _so3_log_map(Rs)
+            for n in range(number_of_points):
+                delta_rotation_n = Rs[n].reshape(1, -1)
+                delta_translation_n = ts[n].reshape([1, 3, 1])
+                self.register_parameter(f"delta_rotation_{n}", nn.Parameter(delta_rotation_n))
+                self.register_parameter(f"delta_translation_{n}", nn.Parameter(delta_translation_n))
+        else:
+            for n in range(number_of_points):
+                self.register_parameter(
+                    f"delta_rotation_{n}", nn.Parameter(zero_rotation))
+                self.register_parameter(
+                    f"delta_translation_{n}", nn.Parameter(zero_translation)
+                )
+            self.register_buffer("zero_rotation", torch.eye(3)[None, ...])
+            self.register_buffer("zero_translation", torch.zeros([1, 3, 1]))
+
         self.traced_so3_exp_map = None
         self.number_of_points = number_of_points
 
@@ -523,9 +603,8 @@ class CameraPoseDeltaCollection(torch.nn.Module):
         se_3 = torch.cat(se_3, dim=0)
         t_out = torch.cat(t_out, dim=0)
         if self.traced_so3_exp_map is None:
-            self.traced_so3_exp_map = torch.jit.trace(
-                _so3_exp_map, (se_3,))
-        R_out = _so3_exp_map(se_3)[0] # returns rotation matrix
+            self.traced_so3_exp_map = torch.jit.trace(_so3_exp_map, (se_3,))
+        R_out = _so3_exp_map(se_3)[0]  # returns rotation matrix
 
         return R_out, t_out
 
@@ -539,4 +618,3 @@ class CameraPoseDeltaCollection(torch.nn.Module):
                 _so3_exp_map, (delta_rotation,))
         R = _so3_exp_map(delta_rotation)[0]
         return R, delta_translation
-

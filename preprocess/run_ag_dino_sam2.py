@@ -160,7 +160,6 @@ class AgGDinoSam2:
         os.makedirs(video_output_path_vis, exist_ok=True)
         os.makedirs(video_output_path_mask, exist_ok=True)
 
-        # Placeholder for actual implementation
         frame_id_list, frame_paths = self.get_frame_paths(video_name)
         for frame_id, frame_path in tqdm(zip(frame_id_list, frame_paths), total=len(frame_id_list)):
             # Process each frame in the video
